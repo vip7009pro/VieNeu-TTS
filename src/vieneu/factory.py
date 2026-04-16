@@ -33,3 +33,8 @@ def Vieneu(mode="turbo", **kwargs):
         case "standard":
             from .standard import VieNeuTTS
             return VieNeuTTS(**kwargs)
+        case _:
+            raise ValueError(
+                f"Unknown mode '{mode}'. "
+                f"Valid modes: standard, fast, gpu, turbo, turbo_gpu, remote, api, xpu"
+            )

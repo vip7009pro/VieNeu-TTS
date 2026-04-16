@@ -1,6 +1,7 @@
 import numpy as np
 import re
 import logging
+import threading
 from typing import List, Dict, Optional, Any
 
 # Configure logging
@@ -8,6 +9,7 @@ logger = logging.getLogger("Vieneu.Utils")
 
 # Persistent cache for weights to avoid recomputing if frame_length is constant
 _WEIGHT_CACHE: Dict[int, np.ndarray] = {}
+_WEIGHT_CACHE_LOCK = threading.Lock()
 
 def normalize_device(device: str) -> str:
     """
@@ -56,13 +58,14 @@ def _linear_overlap_add(frames: List[np.ndarray], stride: int) -> np.ndarray:
     for frame in frames:
         frame_length = frame.shape[-1]
 
-        if frame_length not in _WEIGHT_CACHE or _WEIGHT_CACHE[frame_length].dtype != dtype:
-            # Recompute weight if not in cache or dtype mismatch
-            t = np.linspace(0, 1, frame_length + 2, dtype=dtype)[1:-1]
-            weight = np.abs(0.5 - (t - 0.5))
-            _WEIGHT_CACHE[frame_length] = weight
-        else:
-            weight = _WEIGHT_CACHE[frame_length]
+        with _WEIGHT_CACHE_LOCK:
+            if frame_length not in _WEIGHT_CACHE or _WEIGHT_CACHE[frame_length].dtype != dtype:
+                # Recompute weight if not in cache or dtype mismatch
+                t = np.linspace(0, 1, frame_length + 2, dtype=dtype)[1:-1]
+                weight = np.abs(0.5 - (t - 0.5))
+                _WEIGHT_CACHE[frame_length] = weight
+            else:
+                weight = _WEIGHT_CACHE[frame_length]
 
         out[..., offset : offset + frame_length] += weight * frame
         sum_weight[offset : offset + frame_length] += weight

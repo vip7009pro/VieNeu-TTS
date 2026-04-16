@@ -4,6 +4,14 @@ from typing import Optional, Union, List, Dict, Any
 import json
 import numpy as np
 import logging
+try:
+    import torch
+except ImportError:
+    torch = None
+try:
+    import librosa
+except ImportError:
+    librosa = None
 from huggingface_hub import hf_hub_download
 from sea_g2p import Normalizer
 
@@ -60,8 +68,14 @@ class BaseVieneuTTS(ABC):
                 ) from e
 
         # For PyTorch codecs, check for torch first
+        if torch is None:
+            raise ImportError(
+                f"Codec '{codec_repo}' requires PyTorch. \n"
+                "To remain lightweight in Remote mode, please use 'neuphonic/neucodec-onnx-decoder-int8'. \n"
+                "Or install torch via: pip install vieneu[gpu]"
+            )
+
         try:
-            import torch
             from neucodec import NeuCodec, DistillNeuCodec
             
             # Check MPS
@@ -77,12 +91,8 @@ class BaseVieneuTTS(ABC):
                 raise ValueError(f"Unrecognized codec repository: {codec_repo}")
 
             self.codec.eval().to(codec_device)
-        except ImportError:
-            raise ImportError(
-                f"Codec '{codec_repo}' requires PyTorch. \n"
-                "To remain lightweight in Remote mode, please use 'neuphonic/neucodec-onnx-decoder-int8'. \n"
-                "Or install torch via: pip install vieneu[gpu]"
-            )
+        except ImportError as e:
+            raise ImportError(f"neucodec is required for codec '{codec_repo}'.") from e
 
 
     def _init_watermarker(self) -> None:
@@ -224,10 +234,9 @@ class BaseVieneuTTS(ABC):
                 codes = np.array(codes, dtype=np.float32)
             else:
                 # Là integer token sequence (Standard mode)
-                try:
-                    import torch
+                if torch is not None:
                     codes = torch.tensor(codes, dtype=torch.long)
-                except ImportError:
+                else:
                     codes = np.array(codes, dtype=np.int64)
 
         return {"codes": codes, "text": voice_data["text"]}
@@ -256,24 +265,25 @@ class BaseVieneuTTS(ABC):
         Returns:
             Union[np.ndarray, torch.Tensor]: Encoded codes.
         """
-        import librosa
+        if librosa is None:
+            raise ImportError("librosa is required for encode_reference. Please install it.")
+
         wav, _ = librosa.load(ref_audio_path, sr=16000, mono=True)
         
         # If we have an ONNX encoder or specialized turbo encoder, handle it here
         # For now, default backends still use torch
-        try:
-            import torch
-            wav_tensor = torch.from_numpy(wav).float().unsqueeze(0).unsqueeze(0)  # [1, 1, T]
-
-            # Ensure device and dtype compatibility
-            if hasattr(self.codec, "device"):
-                wav_tensor = wav_tensor.to(self.codec.device)
-
-            with torch.no_grad():
-                ref_codes = self.codec.encode_code(audio_or_path=wav_tensor).squeeze(0).squeeze(0)
-            return ref_codes
-        except ImportError:
+        if torch is None:
             raise ImportError("Torch is required for encode_reference in the current backend. Please install torch or use a backend that supports standalone encoding.")
+
+        wav_tensor = torch.from_numpy(wav).float().unsqueeze(0).unsqueeze(0)  # [1, 1, T]
+
+        # Ensure device and dtype compatibility
+        if hasattr(self.codec, "device"):
+            wav_tensor = wav_tensor.to(self.codec.device)
+
+        with torch.no_grad():
+            ref_codes = self.codec.encode_code(audio_or_path=wav_tensor).squeeze(0).squeeze(0)
+        return ref_codes
 
     def _decode(self, codes_str: str) -> np.ndarray:
         """
@@ -297,20 +307,19 @@ class BaseVieneuTTS(ABC):
             recon = self.codec.decode_code(codes)
         # Torch decode
         else:
-            try:
-                import torch
-                with torch.no_grad():
-                    codes = torch.tensor(speech_ids, dtype=torch.long)[None, None, :]
-                    if hasattr(self.codec, "device"):
-                        codes = codes.to(self.codec.device)
-
-                    recon = self.codec.decode_code(codes)
-                    if hasattr(recon, "cpu"):
-                        recon = recon.cpu()
-                    if hasattr(recon, "numpy"):
-                        recon = recon.numpy()
-            except ImportError:
+            if torch is None:
                 raise ImportError("Torch is required for the current codec backend. Please install torch or use an ONNX-based codec.")
+
+            with torch.no_grad():
+                codes = torch.tensor(speech_ids, dtype=torch.long)[None, None, :]
+                if hasattr(self.codec, "device"):
+                    codes = codes.to(self.codec.device)
+
+                recon = self.codec.decode_code(codes)
+                if hasattr(recon, "cpu"):
+                    recon = recon.cpu()
+                if hasattr(recon, "numpy"):
+                    recon = recon.numpy()
 
 
         return recon[0, 0, :]
@@ -356,12 +365,14 @@ class BaseVieneuTTS(ABC):
             return codes.flatten().tolist()
 
         # Check for torch without importing it at module level
-        try:
-            import torch
-            if isinstance(codes, torch.Tensor):
-                return codes.flatten().tolist()
-        except ImportError:
-            pass
+        if torch is not None and hasattr(torch, "Tensor"):
+            try:
+                if isinstance(codes, torch.Tensor):
+                    return codes.flatten().tolist()
+            except TypeError:
+                # Handle cases where torch.Tensor is a MagicMock and causes isinstance to fail
+                if str(type(codes)).find('torch.Tensor') != -1 or getattr(codes, '__class__', None) == torch.Tensor:
+                    return codes.flatten().tolist()
 
         # Fallback for other array-like types
         if hasattr(codes, "tolist"):

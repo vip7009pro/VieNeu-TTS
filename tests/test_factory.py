@@ -48,6 +48,6 @@ def test_factory_xpu(mock_xpu):
     mock_xpu.assert_called_once()
 
 def test_factory_invalid_mode():
-    # Factory with unknown mode should return None (match-case without default)
-    # The current implementation of factory.py ends with the last case
-    assert Vieneu(mode="unknown") is None
+    # Factory with unknown mode should raise ValueError
+    with pytest.raises(ValueError, match="Unknown mode 'unknown'"):
+        Vieneu(mode="unknown")

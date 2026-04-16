@@ -5,6 +5,8 @@ which provides a unified, tested, and maintained Vietnamese G2P pipeline.
 """
 import functools
 import logging
+import time
+from cachetools import TTLCache
 from sea_g2p import SEAPipeline, G2P, Normalizer
 
 logger = logging.getLogger("Vieneu.Phonemizer")
@@ -38,10 +40,33 @@ def _get_normalizer() -> Normalizer:
 # Public API  (same signatures as before — callers don't need to change)
 # ---------------------------------------------------------------------------
 
-@functools.lru_cache(maxsize=1024)
+_PHONEMIZE_CACHE = TTLCache(maxsize=1024, ttl=3600)
+_CACHE_STATS = {"hits": 0, "misses": 0, "last_log": 0}
+
 def _phonemize_cached(text: str) -> str:
-    """Cached single-text phonemization (normalize + G2P)."""
-    return _get_pipeline().run(text)
+    """Cached single-text phonemization (normalize + G2P) using TTLCache."""
+    global _PHONEMIZE_CACHE
+
+    if text in _PHONEMIZE_CACHE:
+        _CACHE_STATS["hits"] += 1
+        result = _PHONEMIZE_CACHE[text]
+    else:
+        _CACHE_STATS["misses"] += 1
+        result = _get_pipeline().run(text)
+        _PHONEMIZE_CACHE[text] = result
+
+    # Log cache info periodically (every 100 calls or 5 minutes)
+    current_time = time.time()
+    total_calls = _CACHE_STATS["hits"] + _CACHE_STATS["misses"]
+    if total_calls % 100 == 0 or (current_time - _CACHE_STATS["last_log"] > 300):
+        hit_rate = (_CACHE_STATS["hits"] / total_calls) * 100 if total_calls > 0 else 0
+        logger.info(
+            f"Phonemizer Cache Info: Hits={_CACHE_STATS['hits']}, Misses={_CACHE_STATS['misses']}, "
+            f"Hit Rate={hit_rate:.2f}%, Size={len(_PHONEMIZE_CACHE)}/1024"
+        )
+        _CACHE_STATS["last_log"] = current_time
+
+    return result
 
 
 def phonemize_text(text: str) -> str:
