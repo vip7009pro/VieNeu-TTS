@@ -1,15 +1,21 @@
 
+import io
 import os
 import time
-import asyncio
-import numpy as np
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, StreamingResponse
-import uvicorn
-from vieneu import Vieneu
-import io
 import wave
-from huggingface_hub import hf_hub_download
+from datetime import datetime
+from pathlib import Path
+from uuid import uuid4
+
+import numpy as np
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from pydantic import BaseModel, Field
+
+from vieneu import Vieneu
+from vieneu_utils.url_extract import extract_text_from_url
 
 # ==========================================
 # CONFIG GGUF MODELS
@@ -27,6 +33,7 @@ AVAILABLE_MODELS = {
     },
     "ngochuyen": {
         "id": "pnnbao-ump/VieNeu-TTS-0.3B-ngoc-huyen-gguf-Q4_0",
+        "gguf_filename": "VieNeu-TTS-0.3B-ngoc-huyen-Q4_0.gguf",
         "name": "VieNeu 0.3B (Q4_0) - Ngoc Huyen",
         "desc": "Ngoc Huyen Voice"
     }
@@ -36,8 +43,79 @@ DEFAULT_MODEL = "ngochuyen"
 current_model_id = DEFAULT_MODEL
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+OUTPUT_DIR = PROJECT_ROOT / "outputs" / "api"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
 # Global TTS Instance
 tts = None
+
+
+class ModelRequest(BaseModel):
+    model_key: str
+
+
+class UrlRequest(BaseModel):
+    url: str
+    max_chars: int = Field(default=5000, le=20000)
+
+
+class StreamRequest(BaseModel):
+    text: str
+    voice_id: str | None = None
+
+
+class SynthesizeRequest(BaseModel):
+    text: str
+    voice_id: str | None = None
+    filename: str | None = None
+
+
+def _ensure_tts_ready() -> None:
+    if tts is None:
+        raise HTTPException(status_code=503, detail="TTS model is not loaded yet")
+
+
+def _resolve_voice(voice_id: str | None):
+    if not voice_id:
+        return None
+
+    try:
+        return tts.get_preset_voice(voice_id)
+    except Exception as exc:
+        raise HTTPException(status_code=404, detail=f"Voice '{voice_id}' not found") from exc
+
+
+def _build_output_name(prefix: str, voice_id: str | None, filename: str | None) -> str:
+    if filename:
+        safe_name = Path(filename).name
+        if not safe_name.lower().endswith(".wav"):
+            safe_name += ".wav"
+        return safe_name
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    suffix = f"_{voice_id}" if voice_id else ""
+    return f"{prefix}_{timestamp}_{uuid4().hex[:8]}{suffix}.wav"
+
+
+def _synthesize_to_file(text: str, voice_id: str | None = None, filename: str | None = None) -> Path:
+    _ensure_tts_ready()
+
+    voice_data = _resolve_voice(voice_id)
+    audio = tts.infer(text=text, voice=voice_data)
+
+    output_name = _build_output_name("speech", voice_id, filename)
+    output_path = OUTPUT_DIR / output_name
+    tts.save(audio, output_path)
+    return output_path
 
 def load_model_instance(model_key):
     global tts, current_model_id
@@ -59,12 +137,14 @@ def load_model_instance(model_key):
 
     # Reload TTS
     try:
+        gguf_name = AVAILABLE_MODELS.get(model_key, {}).get("gguf_filename") if model_key in AVAILABLE_MODELS else None
         new_tts = Vieneu(
             mode='standard', 
             backbone_repo=repo_id,
             backbone_device="cpu", 
             codec_repo="neuphonic/neucodec-onnx-decoder-int8", 
-            codec_device="cpu" 
+            codec_device="cpu",
+            gguf_filename=gguf_name
         )
         tts = new_tts
         current_model_id = model_key
@@ -95,6 +175,15 @@ except FileNotFoundError:
 async def get_ui():
     return HTMLResponse(content=HTML_CONTENT)
 
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "model_loaded": tts is not None,
+        "current_model": current_model_id,
+    }
+
 @app.get("/models")
 async def get_models():
     """Return available models"""
@@ -102,21 +191,6 @@ async def get_models():
         {"key": k, "name": v["name"], "desc": v["desc"], "active": k == current_model_id}
         for k, v in AVAILABLE_MODELS.items()
     ]
-
-from typing import Optional
-from pydantic import BaseModel, Field
-from vieneu_utils.url_extract import extract_text_from_url
-
-class ModelRequest(BaseModel):
-    model_key: str
-
-class UrlRequest(BaseModel):
-    url: str
-    max_chars: int = Field(default=5000, le=20000)
-
-class StreamRequest(BaseModel):
-    text: str
-    voice_id: Optional[str] = None
 
 @app.post("/set_model")
 async def set_model(req: ModelRequest):
@@ -145,8 +219,7 @@ async def extract_url(req: UrlRequest):
 async def get_voices():
     """Return list of available voices. If none/error, return instruction."""
     try:
-        if tts is None:
-             return [{"id": "error", "name": "Model not loaded yet"}]
+        _ensure_tts_ready()
 
         voices = tts.list_preset_voices()
         
@@ -164,9 +237,27 @@ async def get_voices():
             for vid in voices:
                 result.append({"id": vid, "name": vid})
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"Error listing voices: {e}")
         return [{"id": "error_exception", "name": f"⚠️ Error loading voices: {str(e)}"}]
+
+
+@app.post("/synthesize")
+async def synthesize(req: SynthesizeRequest):
+    """Generate a WAV file from text and return it to the client."""
+    try:
+        output_path = _synthesize_to_file(req.text, req.voice_id, req.filename)
+        return FileResponse(
+            path=str(output_path),
+            media_type="audio/wav",
+            filename=output_path.name,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 def float32_to_pcm16(audio_float):
     """Convert float32 [-1, 1] to int16 bytes"""
@@ -176,6 +267,7 @@ def float32_to_pcm16(audio_float):
 @app.get("/stream")
 async def stream_audio(text: str, voice_id: str = None):
     """Streaming Endpoint with Voice Support"""
+    _ensure_tts_ready()
     
     voice_data = None
     if voice_id:

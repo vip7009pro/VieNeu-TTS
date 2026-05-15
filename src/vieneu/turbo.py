@@ -186,7 +186,7 @@ class TurboGPUVieNeuTTS(BaseTurboVieNeuTTS):
         new_tokens = output_tokens[0, inputs['input_ids'].shape[-1]:].cpu()
         return self.tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-    def infer(self, text: str, voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_chars: int = 256, skip_normalize: bool = False, skip_phonemize: bool = False, show_progress: bool = True, apply_watermark: bool = True, **kwargs) -> np.ndarray:
+    def infer(self, text: str, voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_chars: int = 256, skip_normalize: bool = False, skip_phonemize: bool = False, show_progress: bool = True, apply_watermark: bool = False, **kwargs) -> np.ndarray:
         phonemes = phonemize_text(text) if not skip_phonemize else text
         chunks = split_into_chunks_v2(phonemes, max_chunk_size=max_chars)
 
@@ -218,7 +218,7 @@ class TurboGPUVieNeuTTS(BaseTurboVieNeuTTS):
             final_wav = self._apply_watermark(final_wav)
         return final_wav
 
-    def infer_batch(self, texts: List[str], voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_batch_size: int = 4, apply_watermark: bool = True, **kwargs) -> List[np.ndarray]:
+    def infer_batch(self, texts: List[str], voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_batch_size: int = 4, apply_watermark: bool = False, **kwargs) -> List[np.ndarray]:
         if voice is None:
             voice = ref_codes if ref_codes is not None else self.get_preset_voice()
         voice_embedding = self._get_voice_params(voice)
@@ -308,7 +308,7 @@ class TurboVieNeuTTS(BaseTurboVieNeuTTS):
         )
         logger.info(f"✅ Turbo GGUF ready")
 
-    def infer(self, text: str, voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_chars: int = 256, skip_normalize: bool = False, skip_phonemize: bool = False, show_progress: bool = True, apply_watermark: bool = True, **kwargs) -> np.ndarray:
+    def infer(self, text: str, voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_chars: int = 256, skip_normalize: bool = False, skip_phonemize: bool = False, show_progress: bool = True, apply_watermark: bool = False, **kwargs) -> np.ndarray:
         phonemes = phonemize_text(text) if not skip_phonemize else text
         chunks = split_into_chunks_v2(phonemes, max_chunk_size=max_chars)
 
@@ -358,7 +358,7 @@ class TurboVieNeuTTS(BaseTurboVieNeuTTS):
                 if silence_dur > 0:
                     yield np.zeros(int(self.sample_rate * silence_dur), dtype=np.float32)
 
-    def infer_batch(self, texts: List[str], voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_batch_size: int = 4, apply_watermark: bool = True, **kwargs) -> List[np.ndarray]:
+    def infer_batch(self, texts: List[str], voice: Optional[Any] = None, ref_codes: Optional[Any] = None, temperature: float = 0.4, top_k: int = 50, max_batch_size: int = 4, apply_watermark: bool = False, **kwargs) -> List[np.ndarray]:
         if voice is None:
             voice = ref_codes if ref_codes is not None else self.get_preset_voice()
         voice_embedding = self._get_voice_params(voice)

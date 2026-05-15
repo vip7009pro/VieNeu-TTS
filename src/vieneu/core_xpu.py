@@ -147,7 +147,7 @@ class XPUVieNeuTTS(VieNeuTTS):
             temperature: float = 1.0, 
             top_k: int = 50,
             skip_normalize: bool = False,
-            apply_watermark: bool = True
+            apply_watermark: bool = False
             ) -> list[np.ndarray]:
         """
         Thực hiện inference theo batch trên XPU sử dụng thuần PyTorch.

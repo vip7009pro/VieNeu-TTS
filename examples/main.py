@@ -16,9 +16,10 @@ def main():
     # ---------------------------------------------------------
     # PART 1: INITIALIZATION
     # ---------------------------------------------------------
-    # Mode="standard" (default) runs locally. 
-    # By default, it uses "pnnbao-ump/VieNeu-TTS-0.3B-q4-gguf" (Backbone)
-    # and "neuphonic/distill-neucodec" (Codec) for maximum speed.
+    # Mode="standard" (default) runs locally using lightweight ONNX codec.
+    # Note: Voice cloning requires a PyTorch-based codec. If you need voice cloning,
+    # use: Vieneu(codec_repo="neuphonic/distill-neucodec")
+    # and install: pip install neucodec
     tts = Vieneu()
     
     # Optional: If you want to force use a specific PyTorch model:
@@ -76,13 +77,21 @@ def main():
     if os.path.exists(ref_audio):
         print("\n--- PART 5: Voice Cloning ---")
         print(f"🦜 Cloning voice from: {ref_audio}")
-        cloned_audio = tts.infer(
-            text="Đây là giọng nói đã được clone thành công từ file mẫu.",
-            ref_audio=ref_audio,
-            ref_text=ref_text
-        )
-        tts.save(cloned_audio, "outputs/standard_cloned_output.wav")
-        print("💾 Saved cloned voice to: outputs/standard_cloned_output.wav")
+        try:
+            cloned_audio = tts.infer(
+                text="Đây là giọng nói đã được clone thành công từ file mẫu.",
+                ref_audio=ref_audio,
+                ref_text=ref_text
+            )
+            tts.save(cloned_audio, "outputs/standard_cloned_output.wav")
+            print("💾 Saved cloned voice to: outputs/standard_cloned_output.wav")
+        except AttributeError as e:
+            if "encode_code" in str(e):
+                print("⚠️  Voice cloning requires PyTorch codec (current: ONNX-only decoder)")
+                print("   To enable voice cloning, install: pip install neucodec")
+                print("   Then initialize with: Vieneu(codec_repo='neuphonic/distill-neucodec')")
+            else:
+                raise
 
     # ---------------------------------------------------------
     # PART 6: CLEANUP
