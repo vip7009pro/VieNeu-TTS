@@ -15,6 +15,11 @@ backbone_configs:
     repo: pnnbao-ump/VieNeu-TTS-v2-Turbo-GGUF
     supports_streaming: true
     description: "🚀 Turbo v2: Siêu nhanh, hỗ trợ multi-lingual, tối ưu tuyệt đối cho CPU & Thiết bị yếu"
+  "VieNeu-TTS-v2 (GPU)":
+    repo: pnnbao-ump/VieNeu-TTS-v2
+    gguf_filename: VieNeu-TTS-v2-Q4-K-M.gguf
+    supports_streaming: true
+    description: "⭐ Custom voice GGUF optimized for CPU"
 
 codec_configs:
   "NeuCodec (Distill)":

@@ -831,6 +831,7 @@
             const [models, setModels] = useState([]);
             const [currentModel, setCurrentModel] = useState(null);
             const [isModelLoading, setIsModelLoading] = useState(false);
+            const [isDownloadingWav, setIsDownloadingWav] = useState(false);
 
             const [audioBlob, setAudioBlob] = useState(null);
             const [analyserNode, setAnalyserNode] = useState(null);
@@ -1050,6 +1051,48 @@
                         console.error("Stream Error", e);
                         setStatus(StreamStatus.ERROR);
                     }
+                }
+            };
+
+            const handleDownloadWavDirect = async () => {
+                if (!text.trim()) return;
+
+                setIsDownloadingWav(true);
+                try {
+                    const response = await fetch(`${API_URL}/synthesize`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            text,
+                            voice_id: selectedVoice || undefined,
+                            filename: `vieneu_tts_${Date.now()}.wav`
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => null);
+                        const message = errorData?.detail || errorData?.message || `HTTP ${response.status}`;
+                        throw new Error(message);
+                    }
+
+                    const blob = await response.blob();
+                    const contentDisposition = response.headers.get('content-disposition') || '';
+                    const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+                    const filename = filenameMatch?.[1] || `vieneu_tts_${Date.now()}.wav`;
+
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } catch (e) {
+                    console.error('Direct WAV export failed', e);
+                    alert(`Download failed: ${e.message}`);
+                } finally {
+                    setIsDownloadingWav(false);
                 }
             };
 
@@ -1360,13 +1403,22 @@
                                             ⏹ Stop Stream
                                         </button>
                                     ) : (
-                                        <button
-                                            onClick={handleGenerate}
-                                            disabled={status !== StreamStatus.IDLE && status !== StreamStatus.COMPLETED}
-                                            className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
-                                        >
-                                            {status === StreamStatus.CONNECTING ? 'Connecting...' : 'Generate Stream'}
-                                        </button>
+                                        <div className="space-y-3">
+                                            <button
+                                                onClick={handleGenerate}
+                                                disabled={status !== StreamStatus.IDLE && status !== StreamStatus.COMPLETED}
+                                                className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {status === StreamStatus.CONNECTING ? 'Connecting...' : 'Generate Stream'}
+                                            </button>
+                                            <button
+                                                onClick={handleDownloadWavDirect}
+                                                disabled={isDownloadingWav || !text.trim() || (status !== StreamStatus.IDLE && status !== StreamStatus.COMPLETED)}
+                                                className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                                {isDownloadingWav ? 'Generating WAV...' : '⬇️ Download WAV (No Stream)'}
+                                            </button>
+                                        </div>
                                     )}
 
                                     <div className="flex items-center justify-between">

@@ -36,10 +36,16 @@ AVAILABLE_MODELS = {
         "gguf_filename": "VieNeu-TTS-0.3B-ngoc-huyen-Q4_0.gguf",
         "name": "VieNeu 0.3B (Q4_0) - Ngoc Huyen",
         "desc": "Ngoc Huyen Voice"
-    }
+    },
+    "my_custom": {
+    "id": "pnnbao-ump/VieNeu-TTS-v2",
+    "gguf_filename": "VieNeu-TTS-v2-Q4-K-M.gguf",   # optional, include if GGUF filename differs
+    "name": "VieNeu-TTS-v2-Q4-K-M (Custom)",
+    "desc": "My downloaded voice"
+}
 }
 
-DEFAULT_MODEL = "ngochuyen"
+DEFAULT_MODEL = "my_custom"
 current_model_id = DEFAULT_MODEL
 app = FastAPI()
 
